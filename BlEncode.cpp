@@ -3,20 +3,19 @@
 #include<string>
 #include<fstream>
 #include<ctime>
+#include"spdlog/spdlog.h"
 using namespace std;
 
 BlEncode::BlEncode()
-{
-	_path = "./";
-	_tableName = "test";//tbl_paraminfo
-}
+{}
 
-bool BlEncode::connectMysql()
+bool BlEncode::connectMysql(string databaseName)
 {
+	char* p = _strdup(databaseName.c_str());
 	mysql_init(&_mysql);
 	mysql_options(&_mysql, MYSQL_SET_CHARSET_NAME, "gbk");
-	//mysql_real_connect²ÎÊı£º2.±¾µØµØÖ·  3.ÄãµÄmysqlÓÃ»§Ãû  4.ÄãµÄmysqlÃÜÂë   5.Êı¾İ¿âÃû×Ö  6.¶Ë¿ÚºÅ
-	if (mysql_real_connect(&_mysql, "localhost", "root", "123456", "mydb", 3306, NULL, 0) == NULL)
+	//mysql_real_connectå‚æ•°ï¼š2.æœ¬åœ°åœ°å€  3.ä½ çš„mysqlç”¨æˆ·å  4.ä½ çš„mysqlå¯†ç    5.æ•°æ®åº“åå­—  6.ç«¯å£å·
+	if (mysql_real_connect(&_mysql, "localhost", "root", "123456", p, 3306, NULL, 0) == NULL)
 	{
 		return false;
 	}
@@ -78,9 +77,9 @@ string BlEncode::decompressData(int num)
 	return str;
 }
 
-string BlEncode::getCardnetInfo()
+bool BlEncode::getCardnetInfo(string tableName)
 {
-	string sql = "SELECT DISTINCT cardnet FROM " + _tableName + " ORDER BY CardNet ASC";
+	string sql = "SELECT DISTINCT cardnet FROM " + tableName + " ORDER BY CardNet ASC";
 	char* p = _strdup(sql.c_str());
 	mysql_query(&_mysql, p);
 	MYSQL_RES* res = mysql_store_result(&_mysql);
@@ -97,7 +96,7 @@ string BlEncode::getCardnetInfo()
 	int category = _cardNetInfos.size();
 	for (int i = 0; i < category; i++)
 	{
-		sql = "select COUNT(*) from " + _tableName + " where CardNet = " + _cardNetInfos[i].cardnet;
+		sql = "select COUNT(*) from " + tableName + " where CardNet = " + _cardNetInfos[i].cardnet;
 		p = _strdup(sql.c_str());
 		mysql_query(&_mysql, p);
 		res = mysql_store_result(&_mysql);
@@ -108,41 +107,40 @@ string BlEncode::getCardnetInfo()
 		}
 	}
 	mysql_free_result(res);
-	string index = "";
-	for (int i = 0; i < category; i++)
+	if (_cardNetInfos.size() != 0)
 	{
-		index = index + _cardNetInfos[i].cardnet + ":" + to_string(_cardNetInfos[i].count) + "#";
+		return true;
 	}
-	cout << index << endl;
-	return index;
+	return false;
 }
 
-void BlEncode::BlockEncode(string compressedDataPath)
+void BlEncode::BlockEncode(string databaseName, string tableName, int flag ,string compressedDataPath, string compressedDataFileName)
 {
-	if (connectMysql() == false)
+	if (connectMysql(databaseName) == false)
 	{
 		cout << (mysql_error(&_mysql));
 		return;
 	}
-	_path = compressedDataPath;
-	string index = getCardnetInfo();
-	ofstream outfile(_path + "/CompressedData.dat", ios::app | ios::binary);
-	outfile << index << endl;
-
+	if (!getCardnetInfo(tableName))
+	{
+		spdlog::error("è·å–ç´¢å¼•å¤±è´¥");
+		return;
+	}
+	
 	string sql = "";
 	char* p;
 	bool* isCorrect = new bool;
 	*isCorrect = true;
-	int temp = 0;
 	string str;
 	MYSQL_ROW row;
 	MYSQL_RES* res = NULL;
 	int category = _cardNetInfos.size();
 	unsigned char cardID[8];
+	_loadedData.clear();
 	for (int i = 0; i < category; i++)
 	{
-		cout << i << endl;
-		sql = "SELECT * FROM " + _tableName + " WHERE CardNet = "
+		spdlog::info("{}", _cardNetInfos[i].cardnet);
+		sql = "SELECT * FROM " + tableName + " WHERE CardNet = "
 			+ _cardNetInfos[i].cardnet + " ORDER BY CardID ASC";
 		p = _strdup(sql.c_str());
 		mysql_query(&_mysql, p);
@@ -150,7 +148,7 @@ void BlEncode::BlockEncode(string compressedDataPath)
 		while (row = mysql_fetch_row(res))
 		{
 			str = row[1];
-			temp = str.size();
+			int temp = str.size();
 			if (temp < 16)
 			{
 				for (int i = temp; i < 16; i++)
@@ -160,44 +158,73 @@ void BlEncode::BlockEncode(string compressedDataPath)
 			}
 			else if (temp > 16)
 			{
-				cout << "Êı¾İÓĞÎó: " << str << endl;
+				spdlog::error("æ•°æ®é”™è¯¯: {}", str);
+				_cardNetInfos[i].count--;
 				continue;
 			}
+			
 			for (int i = 0; i < 15; i = i + 2)
 			{
 				cardID[(i / 2)] = compressData(str.substr(i, 2), isCorrect);
 			}
 			if (*isCorrect == false)
 			{
-				cout << "Êı¾İÓĞÎó: " << str << endl;
+				spdlog::error("æ•°æ®é”™è¯¯: {}", str);
+				_cardNetInfos[i].count--;
 				*isCorrect = true;
 				continue;
 			}
 			for (int i = 0; i < 8; i++)
 			{
-				outfile.write((char*)&cardID[i], sizeof(cardID[i]));
+				//outfile.write((char*)&cardID[i], sizeof(cardID[i]));
+				_loadedData.push_back(cardID[i]);
 			}
 			str = row[2];
 			temp = stoi(str);
 			cardID[0] = (unsigned char)(temp & 0xff);
-			outfile.write((char*)&cardID[0], sizeof(cardID[0]));
+			_loadedData.push_back(cardID[0]);
+			if (flag == 1)
+			{
+				str = row[3];
+				temp = stoi(str);
+				cardID[0] = (unsigned char)(temp & 0xff);
+				_loadedData.push_back(cardID[0]);
+			}
 		}
 
+	}
+	ofstream outfile(compressedDataPath + compressedDataFileName +".dat", ios::app | ios::binary);
+	string index = "";
+	for (int i = 0; i < category; i++)
+	{
+		index = index + _cardNetInfos[i].cardnet + ":" + to_string(_cardNetInfos[i].count) + "#";
+	}
+	spdlog::info("index: {}", index);
+	outfile << index << endl;
+	for (int i = 0; i < _loadedData.size(); i++)
+	{
+		outfile.write((char*)&_loadedData[i], sizeof(_loadedData[i]));
 	}
 	mysql_free_result(res);
 	mysql_close(&_mysql);
 	outfile.close();
+	delete isCorrect;
+	for (int i = 0; i < _cardNetInfos.size(); i++)
+	{
+		spdlog::info("{}:{}", _cardNetInfos[i].cardnet, _cardNetInfos[i].count);
+	}
 }
 
-void BlEncode::checkData(string compressedDataPath, string decompressedDataPath)
+void BlEncode::checkData(string compressedDataPath, string compressedDataFileName,int flag ,string decompressedDataPath)
 {
-	_path = compressedDataPath;
-	ifstream inFile(_path + "/CompressedData.dat", ios::binary);
+	_loadedData.clear();
+	_cardNetInfos.clear();
+	ifstream inFile(compressedDataPath + compressedDataFileName + ".dat", ios::binary);
 	char index;
 	string str = "";
 	CardNetInfo cardNetInfo;
 	int sequence = 0;
-	//¶ÁÈ¡datÎÄ¼şÖĞË÷Òı
+	//è¯»å–datæ–‡ä»¶ä¸­ç´¢å¼•
 	while (inFile.read((char*)&index, sizeof(char)))
 	{
 		if (index == ':')
@@ -224,8 +251,8 @@ void BlEncode::checkData(string compressedDataPath, string decompressedDataPath)
 	inFile.close();
 	int category = _cardNetInfos.size();
 
-	//¶ÁÈ¡Ñ¹ËõÊı¾İ
-	ifstream inFile2(_path + "/CompressedData.dat", ios::binary);
+	//è¯»å–å‹ç¼©æ•°æ®
+	ifstream inFile2(compressedDataPath + compressedDataFileName + ".dat", ios::binary);
 	unsigned char dataStream;
 	bool isBinary = false;
 	while (inFile2.read((char*)&dataStream, sizeof(char)))
@@ -247,13 +274,23 @@ void BlEncode::checkData(string compressedDataPath, string decompressedDataPath)
 	int loadDataLength = _loadedData.size();
 	string strs = "";
 	int num = 0;
-	int bListType = 0;
-	string cardID = "";
 	string cardNet = "";
+	string cardID = "";
+	int bListType = 0;
+	int status = 0;
 	int count = 0;
 	sequence = 0;
-	ofstream outfile(decompressedDataPath + "/OriginalData.txt", ios::app);
-	for (int i = 0; i < loadDataLength; i = i + 9)
+	ofstream outfile(decompressedDataPath + compressedDataFileName + "OriginalData.txt", ios::app);
+	int dataLength = loadDataLength;
+	if (flag == 0)
+	{
+		dataLength = 9;
+	}
+	else if (flag == 1)
+	{
+		dataLength = 10;
+	}
+	for (int i = 0; i < loadDataLength; i = i + dataLength)
 	{
 		strs = "";
 		for (int j = 0; j < 8; j++)
@@ -261,9 +298,13 @@ void BlEncode::checkData(string compressedDataPath, string decompressedDataPath)
 			num = _loadedData[(j + i)] & 0xff;
 			strs += decompressData(num);
 		}
-		num = _loadedData[(i + 8)] & 0xff;
-		bListType = num;
 		cardID = strs;
+		bListType = _loadedData[(i + 8)] & 0xff;
+		
+		if (flag == 1)
+		{
+			status = _loadedData[(i + 9)] & 0xff;
+		}
 		cardNet = _cardNetInfos[sequence].cardnet;
 		count++;
 		if (count >= _cardNetInfos[sequence].count)
@@ -271,8 +312,17 @@ void BlEncode::checkData(string compressedDataPath, string decompressedDataPath)
 			sequence++;
 			count = 0;
 		}
-		cout << cardNet << " " << cardID << " " << bListType << endl;
-		outfile << cardNet << " " << cardID << " " << bListType << endl;
+		if (flag == 0)
+		{
+			spdlog::info("{} {} {}", cardNet, cardID, bListType);
+			outfile << cardNet << " " << cardID << " " << bListType << endl;
+		}
+		else if (flag == 1)
+		{
+			spdlog::info("{} {} {} {}", cardNet, cardID, bListType, status);
+			outfile << cardNet << " " << cardID << " " << bListType << " " << status << endl;
+		}
+		
 	}
 
 	outfile.close();
