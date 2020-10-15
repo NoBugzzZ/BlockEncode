@@ -8,23 +8,21 @@ class BlEncode
 {
 public:
 	BlEncode();
-	void BlockEncode(std::string compressedDataPath);			//½«Ñ¹ËõÊı¾İ´æÈëdatÎÄ¼şÖĞ
-	void checkData(std::string compressedDataPath,std::string decompressedDataPath);			//½«Ñ¹ËõÊı¾İ½âÑ¹Ëõ²¢´æÈëtxtÎÄ¼şÖĞ
+	void BlockEncode(std::string databaseName, std::string tableName, int flag ,std::string compressedDataPath, std::string compressedDataFileName);			//å°†å‹ç¼©æ•°æ®å­˜å…¥datæ–‡ä»¶ä¸­
+	void checkData(std::string compressedDataPath,std::string compressedDataFileName ,int flag ,std::string decompressedDataPath);			//å°†å‹ç¼©æ•°æ®è§£å‹ç¼©å¹¶å­˜å…¥txtæ–‡ä»¶ä¸­
 private:
 	struct CardNetInfo {
 		std::string cardnet;
 		int count;
 	};
 	
-	bool connectMysql();			//Á´½ÓmysqlÊı¾İ¿â
-	unsigned char compressData(std::string str, bool* isCorrect);	//Ñ¹ËõÊı¾İ
+	bool connectMysql(std::string databaseName);			//é“¾æ¥mysqlæ•°æ®åº“
+	unsigned char compressData(std::string str, bool* isCorrect);	//å‹ç¼©æ•°æ®
 	std::string decompressData(int num);
-	std::string getCardnetInfo();		//µÃµ½cardnetÀàÊıÒÔ¼°ÆäÖµ£¬½¨Á¢Ë÷Òı
-	std::string _path;
+	bool getCardnetInfo(std::string tableName);		//å¾—åˆ°cardnetç±»æ•°ä»¥åŠå…¶å€¼ï¼Œå»ºç«‹ç´¢å¼•
 	std::vector<unsigned char> _loadedData;
 	std::vector<CardNetInfo> _cardNetInfos;
 	MYSQL _mysql;
-	std::string _tableName;
 };
 
 #endif // !__BLENCODE_H__
